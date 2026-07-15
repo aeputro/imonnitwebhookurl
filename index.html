@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Monitoring System — Public Health Laboratory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="grid-overlay"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">SMS</span>
+    <div class="brand-text">
+      <span class="brand-title">Smart Monitoring System</span>
+      <span class="brand-sub">Public Health Laboratory — Cold Chain &amp; Storage Assurance</span>
+    </div>
+  </div>
+  <div class="conn-status" id="connStatus">
+    <span class="conn-dot"></span>
+    <span id="connLabel">Menghubungkan…</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- READOUT PANEL -->
+  <section class="panel readout-panel">
+    <div class="panel-label">01 — Pembacaan Terkini</div>
+    <div class="readout" id="readout">
+      <span class="readout-value" id="readoutValue">--.-</span>
+      <span class="readout-unit">°C</span>
+    </div>
+    <div class="readout-status" id="readoutStatus">Menunggu data sensor…</div>
+
+    <div class="threshold-row">
+      <label for="thresholdInput">Batas suhu aman</label>
+      <div class="threshold-input-group">
+        <input type="number" id="thresholdInput" step="0.5" value="27.0">
+        <span>°C</span>
+        <button id="saveThreshold" class="btn-ghost">Simpan</button>
+      </div>
+    </div>
+
+    <div class="test-row">
+      <label>Uji manual (tanpa menunggu sensor)</label>
+      <div class="test-input-group">
+        <input type="number" id="testTemp" step="0.5" placeholder="misal 28.5">
+        <button id="testTrigger" class="btn-primary">Kirim Uji Suhu</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- REGISTRATION PANEL -->
+  <section class="panel register-panel">
+    <div class="panel-label">02 — Nomor Penerima Alert</div>
+
+    <form id="registerForm" class="register-form">
+      <div class="field">
+        <label for="nameInput">Nama PIC</label>
+        <input type="text" id="nameInput" placeholder="Contoh: Bu Ellis" required>
+      </div>
+      <div class="field">
+        <label for="phoneInput">Nomor WhatsApp</label>
+        <input type="text" id="phoneInput" placeholder="628123456789" required>
+      </div>
+      <div class="field">
+        <label for="apiKeyInput">CallMeBot API Key</label>
+        <input type="text" id="apiKeyInput" placeholder="Dari aktivasi WhatsApp CallMeBot" required>
+      </div>
+      <button type="submit" class="btn-primary btn-block">Daftarkan Nomor</button>
+    </form>
+
+    <div class="numbers-list" id="numbersList">
+      <div class="empty-state">Belum ada nomor terdaftar.</div>
+    </div>
+  </section>
+
+  <!-- EVENT LOG -->
+  <section class="panel log-panel">
+    <div class="panel-label">03 — Log Kejadian (Real-time)</div>
+    <div class="log-console" id="logConsole">
+      <div class="log-empty">Log akan muncul di sini saat webhook diterima atau uji manual dijalankan.</div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer-note">
+  Endpoint webhook: <code id="webhookUrl">/webhook/imonnit</code> — daftarkan URL lengkap ini (domain + path) di iMonnit &rarr; Rules &rarr; Webhook.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
