@@ -9,6 +9,7 @@ Alur:
 
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -76,16 +77,27 @@ def send_whatsapp(phone, api_key, message):
         return False, str(e)
 
 
-def notify_all(temperature, threshold, raw_payload=None):
+def notify_all(temperature, threshold, raw_payload=None, device_name=None,
+                rule_name=None, reading_text=None):
     """Kirim WhatsApp ke semua nomor terdaftar, catat event."""
     numbers = get_numbers()
-    message = (
-        f"ALERT Smart Monitoring System\n"
-        f"Suhu terdeteksi: {temperature:.1f} C\n"
-        f"Batas aman: {threshold:.1f} C\n"
-        f"Waktu: {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}\n"
-        f"Segera periksa unit penyimpanan."
-    )
+
+    temp_line = f"Suhu terdeteksi: {temperature:.1f} C" if temperature is not None \
+        else f"Reading: {reading_text or 'N/A'}"
+
+    message_lines = [
+        "ALERT Smart Monitoring System",
+    ]
+    if device_name:
+        message_lines.append(f"Device: {device_name}")
+    if rule_name:
+        message_lines.append(f"Rule: {rule_name}")
+    message_lines.append(temp_line)
+    if threshold is not None:
+        message_lines.append(f"Batas aman: {threshold:.1f} C")
+    message_lines.append(f"Waktu: {datetime.now().strftime('%d-%m-%Y %H:%M:%S')}")
+    message_lines.append("Segera periksa unit penyimpanan.")
+    message = "\n".join(message_lines)
 
     results = []
     for n in numbers:
@@ -98,6 +110,9 @@ def notify_all(temperature, threshold, raw_payload=None):
         "threshold": threshold,
         "status": "ALERT",
         "notified": results,
+        "device_name": device_name,
+        "rule_name": rule_name,
+        "reading_text": reading_text,
         "raw_payload": raw_payload,
     })
     return results
@@ -182,71 +197,68 @@ def api_events():
 @app.route("/webhook/imonnit", methods=["POST"])
 def webhook_imonnit():
     """
-    PENTING: Struktur JSON iMonnit bisa bervariasi tergantung template rule
-    yang kamu pilih di dashboard iMonnit (Rule > Webhook > Payload format).
+    Struktur JSON iMonnit yang sebenarnya (Rule Webhook Contents), field lowercase:
 
-    Kode di bawah ini mencoba beberapa kemungkinan field yang umum dipakai.
-    Setelah webhook pertama kali masuk, cek log mentah di /api/events atau
-    log server untuk melihat struktur JSON asli, lalu sesuaikan fungsi
-    extract_temperature() di bawah jika perlu.
+        {
+          "subject": "...", "reading": "Temperature: 28.4 F", "rule": "...",
+          "date": "...", "time": "...", "readingDate": "...", "readingTime": "...",
+          "originalReadingDate": "...", "originalReadingTime": "...",
+          "originalReading": "...", "acknowledgeURL": "...", "parentAccount": "...",
+          "deviceID": "...", "name": "...", "networkID": "...", "network": "...",
+          "accountID": "...", "accountNumber": "...", "companyName": "..."
+        }
+
+    PENTING: webhook ini HANYA dipanggil iMonnit kalau rule-nya sendiri sudah
+    terpicu (kondisi ambang batas sudah dicek di sisi iMonnit). Jadi begitu
+    endpoint ini menerima request, kita anggap itu ALERT dan langsung kirim
+    WhatsApp — bukan mengevaluasi ulang threshold dari nol. Angka suhu tetap
+    kita ekstrak dari field "reading" (formatnya string, misal "Temperature: 28.4 F"),
+    supaya bisa ditampilkan di dashboard dan pesan WhatsApp.
     """
     payload = request.get_json(silent=True) or {}
-
-    # Log payload mentah dulu — supaya kalau parsing gagal, kita tetap
-    # punya data untuk debug & sesuaikan.
     app.logger.info(f"iMonnit webhook payload diterima: {payload}")
 
-    temperature = extract_temperature(payload)
+    reading_text = payload.get("reading") or payload.get("originalReading") or ""
+    temperature = extract_temperature(reading_text)
     threshold = get_threshold()
 
-    if temperature is None:
-        # Tetap catat event supaya kelihatan di log, tapi tidak kirim alert
-        add_event({
-            "timestamp": datetime.now().isoformat(),
-            "temperature": None,
-            "threshold": threshold,
-            "status": "PAYLOAD TIDAK DIKENALI",
-            "notified": [],
-            "raw_payload": payload,
-        })
-        return jsonify({"status": "received_but_unparsed", "payload": payload}), 200
+    device_name = payload.get("name") or payload.get("deviceID") or "Unknown Device"
+    rule_name = payload.get("rule") or payload.get("subject") or "Unknown Rule"
 
-    if temperature >= threshold:
-        results = notify_all(temperature, threshold, raw_payload=payload)
-        return jsonify({"status": "alert_sent", "temperature": temperature, "notified": results}), 200
-    else:
-        add_event({
-            "timestamp": datetime.now().isoformat(),
-            "temperature": temperature,
-            "threshold": threshold,
-            "status": "NORMAL",
-            "notified": [],
-            "raw_payload": payload,
-        })
-        return jsonify({"status": "normal", "temperature": temperature}), 200
+    # Webhook dipanggil = rule sudah terpicu di iMonnit -> selalu kirim alert
+    results = notify_all(
+        temperature=temperature,
+        threshold=threshold,
+        raw_payload=payload,
+        device_name=device_name,
+        rule_name=rule_name,
+        reading_text=reading_text,
+    )
+
+    return jsonify({
+        "status": "alert_sent",
+        "temperature": temperature,
+        "reading_text": reading_text,
+        "device_name": device_name,
+        "rule_name": rule_name,
+        "notified": results,
+    }), 200
 
 
-def extract_temperature(payload):
-    """Coba beberapa struktur umum payload webhook iMonnit."""
-    candidates = [
-        payload.get("Value"),
-        payload.get("value"),
-        payload.get("CurrentReading"),
-        payload.get("SensorValue"),
-        payload.get("Reading"),
-    ]
-
-    # Kadang datanya nested, misal payload["Readings"][0]["Value"]
-    readings = payload.get("Readings") or payload.get("readings")
-    if isinstance(readings, list) and readings:
-        candidates.append(readings[0].get("Value") or readings[0].get("value"))
-
-    for c in candidates:
-        if c is not None:
-            try:
-                return float(c)
-            except (ValueError, TypeError):
-                continue
+def extract_temperature(reading_text):
+    """
+    Field 'reading' dari iMonnit berbentuk string seperti:
+      "Temperature: 28.4 F"  atau  "Temp: -18.2 C"  atau  "Battery: 10%"
+    Kita ambil angka pertama (termasuk desimal & minus) dari string tsb.
+    """
+    if not reading_text:
+        return None
+    match = re.search(r"-?\d+(\.\d+)?", reading_text)
+    if match:
+        try:
+            return float(match.group())
+        except (ValueError, TypeError):
+            return None
     return None
 
 
@@ -255,13 +267,24 @@ def extract_temperature(payload):
 # ============================================================
 @app.route("/api/test-trigger", methods=["POST"])
 def test_trigger():
-    """Endpoint bantu untuk simulasi manual saat latihan sebelum demo."""
+    """
+    Endpoint bantu untuk simulasi manual saat latihan/demo sebelum sensor asli
+    tersambung. Berbeda dengan /webhook/imonnit, di sini kita MEMANG mengecek
+    threshold sendiri (karena tidak ada rule iMonnit yang sudah memvalidasi).
+    """
     data = request.get_json(force=True)
     temperature = float(data.get("temperature", 28.0))
     threshold = get_threshold()
 
     if temperature >= threshold:
-        results = notify_all(temperature, threshold, raw_payload={"source": "manual_test"})
+        results = notify_all(
+            temperature=temperature,
+            threshold=threshold,
+            raw_payload={"source": "manual_test"},
+            device_name="Uji Manual",
+            rule_name="Manual Test Trigger",
+            reading_text=f"Temperature: {temperature} C",
+        )
         return jsonify({"status": "alert_sent", "temperature": temperature, "notified": results})
     else:
         add_event({
@@ -270,6 +293,9 @@ def test_trigger():
             "threshold": threshold,
             "status": "NORMAL",
             "notified": [],
+            "device_name": "Uji Manual",
+            "rule_name": "Manual Test Trigger",
+            "reading_text": f"Temperature: {temperature} C",
             "raw_payload": {"source": "manual_test"},
         })
         return jsonify({"status": "normal", "temperature": temperature})
