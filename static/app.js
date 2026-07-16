@@ -161,11 +161,13 @@ async function refreshEvents() {
         const time = new Date(ev.timestamp).toLocaleTimeString('id-ID');
         const tempTxt = ev.temperature !== null && ev.temperature !== undefined
           ? `${ev.temperature.toFixed?.(1) ?? ev.temperature}°C` : 'N/A';
+        const deviceTxt = ev.device_name ? ` [${ev.device_name}]` : '';
+        const ruleTxt = ev.rule_name ? ` — rule: ${ev.rule_name}` : '';
         const msg = isAlert
-          ? `ALERT — ${tempTxt} melebihi batas ${ev.threshold}°C — WhatsApp terkirim ke ${ev.notified.length} nomor`
+          ? `ALERT${deviceTxt} — ${tempTxt}${ruleTxt} — WhatsApp terkirim ke ${ev.notified.length} nomor`
           : ev.status === 'PAYLOAD TIDAK DIKENALI'
             ? `Payload diterima tapi format tidak dikenali — cek log server`
-            : `Normal — ${tempTxt} (batas ${ev.threshold}°C)`;
+            : `Normal${deviceTxt} — ${tempTxt} (batas ${ev.threshold}°C)`;
         entry.innerHTML = `<span class="log-time">${time}</span><span class="log-msg">${msg}</span>`;
         els.logConsole.prepend(entry);
       });
